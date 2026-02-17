@@ -22,9 +22,11 @@ TOKEN_PATTERNS = [
     ('COLON',   r':'),
     ('COMMA',   r','),
     ('SKIP',    r'[ \t]+'),
+    ('STRING',  r'"[^"]*"'),
+    ('NUMBER',  r'\d+(\.\d+)?')
 ]
 
-KEYWORDS = {'if', 'else', 'while', 'def', 'return'}
+KEYWORDS = {'if', 'else', 'while', 'def', 'return', 'print'}
 
 def lex(source):
     tokens = []
@@ -80,6 +82,8 @@ class Parser:
             return self.parse_def()
         if self.match('RETURN'):
             return self.parse_return()
+        if self.match('PRINT'):
+            return self.parse_print()
         return self.parse_expression()
 
     def parse_if(self):
@@ -174,6 +178,13 @@ class Parser:
             exp = self.parse_power()
             return ('binop', '^', base, exp)
         return base
+    
+    def parse_print(self):
+        self.consume('PRINT')
+        self.consume('LPAREN')
+        value = self.parse_expression()
+        self.consume('RPAREN')
+        return ('print', value)
 
     def parse_call(self):
         expr = self.parse_primary()
@@ -206,6 +217,14 @@ class Parser:
             expr = self.parse_expression()
             self.consume('RPAREN')
             return ('group', expr)
+        if tok[0] == 'STRING':
+            self.consume()
+            text = tok[1][1:-1]
+            return ('str', text)
+        if tok[0] == 'NUMBER':
+            self.consume()
+            val = float(tok[1]) if '.' in tok[1] else int(tok[1])
+            return ('num', val)
         raise SyntaxError(f"Unexpected token: '{tok[1]}'")
 
 
@@ -267,12 +286,27 @@ def evaluate(node, env):
         value = evaluate(expr, env)
         env.assign(name, value)
         return value
+    
+    if kind == 'print':
+        _, value = node
+        result = evaluate(value, env)
+        print(result)
+        return None
+    
+    if kind == 'str':
+        return node[1]
+    
+    if kind == 'num':
+        return node[1]
 
     if kind == 'binop':
         _, op, left, right = node
         l = evaluate(left, env)
         r = evaluate(right, env)
-        if op == '+':  return l + r
+        if op == '+':
+            if isinstance(l, str) or isinstance(r, str):
+                return str(l) + str(r)
+            return l + r
         if op == '-':  return l - r
         if op == '*':  return l * r
         if op == '/':
