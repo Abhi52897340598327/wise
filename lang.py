@@ -282,8 +282,8 @@ def evaluate(node, env):
         if op == '^^': return (l ** r) ** r
         if op == '==': return 1 if l == r else 0
         if op == '!=': return 1 if l != r else 0
-        if op == '>':  return 1 if l >  r else 0
-        if op == '<':  return 1 if l <  r else 0
+        if op == '>':  return 1 if l > r else 0
+        if op == '<':  return 1 if l < r else 0
         if op == '>=': return 1 if l >= r else 0
         if op == '<=': return 1 if l <= r else 0
 
@@ -338,7 +338,7 @@ def evaluate(node, env):
 
 def run(source, env):
     tokens = lex(source)
-    ast    = parse(tokens)
+    ast = parse(tokens)
     return evaluate(ast, env)
 
 
