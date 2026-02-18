@@ -2,6 +2,7 @@ import re
 
 # tokens
 TOKEN_PATTERNS = [
+    ('STRING',  r'"[^"]*"'),     # ← moved to top (longer patterns first)
     ('NUMBER',  r'\d+(\.\d+)?'),
     ('IDENT',   r'[a-zA-Z_]\w*'),
     ('DCARET',  r'\^\^'),
@@ -22,8 +23,6 @@ TOKEN_PATTERNS = [
     ('COLON',   r':'),
     ('COMMA',   r','),
     ('SKIP',    r'[ \t]+'),
-    ('STRING',  r'"[^"]*"'),
-    ('NUMBER',  r'\d+(\.\d+)?')
 ]
 
 KEYWORDS = {'if', 'else', 'while', 'def', 'return', 'print'}
@@ -90,19 +89,19 @@ class Parser:
         self.consume('IF')
         condition = self.parse_expression()
         self.consume('COLON')
-        then_branch = self.parse_expression()
+        then_branch = self.parse_statement()      # ← fixed: was parse_expression
         else_branch = None
         if self.match('ELSE'):
             self.consume('ELSE')
             self.consume('COLON')
-            else_branch = self.parse_expression()
+            else_branch = self.parse_statement()  # ← fixed: was parse_expression
         return ('if', condition, then_branch, else_branch)
 
     def parse_while(self):
         self.consume('WHILE')
         condition = self.parse_expression()
         self.consume('COLON')
-        body = self.parse_expression()
+        body = self.parse_statement()             # ← fixed: was parse_expression
         return ('while', condition, body)
 
     def parse_def(self):
@@ -123,6 +122,13 @@ class Parser:
         self.consume('RETURN')
         value = self.parse_expression()
         return ('return', value)
+    
+    def parse_print(self):
+        self.consume('PRINT')
+        self.consume('LPAREN')
+        value = self.parse_expression()
+        self.consume('RPAREN')
+        return ('print', value)
 
     # ── expressions ──
 
@@ -178,13 +184,6 @@ class Parser:
             exp = self.parse_power()
             return ('binop', '^', base, exp)
         return base
-    
-    def parse_print(self):
-        self.consume('PRINT')
-        self.consume('LPAREN')
-        value = self.parse_expression()
-        self.consume('RPAREN')
-        return ('print', value)
 
     def parse_call(self):
         expr = self.parse_primary()
@@ -205,6 +204,10 @@ class Parser:
         tok = self.peek()
         if tok is None:
             raise SyntaxError("Unexpected end of input")
+        if tok[0] == 'STRING':          # ← fixed: check STRING first
+            self.consume()
+            text = tok[1][1:-1]
+            return ('str', text)
         if tok[0] == 'NUMBER':
             self.consume()
             val = float(tok[1]) if '.' in tok[1] else int(tok[1])
@@ -217,14 +220,6 @@ class Parser:
             expr = self.parse_expression()
             self.consume('RPAREN')
             return ('group', expr)
-        if tok[0] == 'STRING':
-            self.consume()
-            text = tok[1][1:-1]
-            return ('str', text)
-        if tok[0] == 'NUMBER':
-            self.consume()
-            val = float(tok[1]) if '.' in tok[1] else int(tok[1])
-            return ('num', val)
         raise SyntaxError(f"Unexpected token: '{tok[1]}'")
 
 
@@ -277,6 +272,9 @@ def evaluate(node, env):
 
     if kind == 'num':
         return node[1]
+    
+    if kind == 'str':           # ← fixed: combined duplicate checks
+        return node[1]
 
     if kind == 'var':
         return env.get(node[1])
@@ -292,12 +290,6 @@ def evaluate(node, env):
         result = evaluate(value, env)
         print(result)
         return None
-    
-    if kind == 'str':
-        return node[1]
-    
-    if kind == 'num':
-        return node[1]
 
     if kind == 'binop':
         _, op, left, right = node
