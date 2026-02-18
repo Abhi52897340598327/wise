@@ -2,9 +2,10 @@ import re
 
 # tokens
 TOKEN_PATTERNS = [
-    ('STRING',  r'"[^"]*"'),     # ← moved to top (longer patterns first)
+    ('STRING',  r'"[^"]*"'),
     ('NUMBER',  r'\d+(\.\d+)?'),
     ('IDENT',   r'[a-zA-Z_]\w*'),
+    ('DOT',     r'\.'),
     ('DCARET',  r'\^\^'),
     ('CARET',   r'\^'),
     ('PLUS',    r'\+'),
@@ -25,7 +26,7 @@ TOKEN_PATTERNS = [
     ('SKIP',    r'[ \t]+'),
 ]
 
-KEYWORDS = {'if', 'else', 'while', 'def', 'return', 'print'}
+KEYWORDS = {'if', 'else', 'while', 'def', 'return', 'print', 'class'}
 
 def lex(source):
     tokens = []
@@ -36,7 +37,6 @@ def lex(source):
             if m:
                 if name != 'SKIP':
                     text = m.group()
-                    # promote keywords from IDENT
                     if name == 'IDENT' and text in KEYWORDS:
                         tokens.append((text.upper(), text))
                     else:
@@ -70,8 +70,6 @@ class Parser:
         tok = self.peek()
         return tok and tok[0] in types
 
-    # ── statements ──
-
     def parse_statement(self):
         if self.match('IF'):
             return self.parse_if()
@@ -79,6 +77,8 @@ class Parser:
             return self.parse_while()
         if self.match('DEF'):
             return self.parse_def()
+        if self.match('CLASS'):
+            return self.parse_class()
         if self.match('RETURN'):
             return self.parse_return()
         if self.match('PRINT'):
@@ -89,19 +89,19 @@ class Parser:
         self.consume('IF')
         condition = self.parse_expression()
         self.consume('COLON')
-        then_branch = self.parse_statement()      # ← fixed: was parse_expression
+        then_branch = self.parse_statement()
         else_branch = None
         if self.match('ELSE'):
             self.consume('ELSE')
             self.consume('COLON')
-            else_branch = self.parse_statement()  # ← fixed: was parse_expression
+            else_branch = self.parse_statement()
         return ('if', condition, then_branch, else_branch)
 
     def parse_while(self):
         self.consume('WHILE')
         condition = self.parse_expression()
         self.consume('COLON')
-        body = self.parse_statement()             # ← fixed: was parse_expression
+        body = self.parse_statement()
         return ('while', condition, body)
 
     def parse_def(self):
@@ -115,7 +115,7 @@ class Parser:
                 self.consume('COMMA')
         self.consume('RPAREN')
         self.consume('COLON')
-        body = self.parse_expression()
+        body = self.parse_statement()
         return ('def', name, params, body)
 
     def parse_return(self):
@@ -129,8 +129,13 @@ class Parser:
         value = self.parse_expression()
         self.consume('RPAREN')
         return ('print', value)
-
-    # ── expressions ──
+    
+    def parse_class(self):
+        self.consume('CLASS')
+        name = self.consume('IDENT')[1]
+        self.consume('COLON')
+        method = self.parse_def()
+        return ('class', name, [method])
 
     def parse_expression(self):
         if self.match('IDENT'):
@@ -187,7 +192,24 @@ class Parser:
 
     def parse_call(self):
         expr = self.parse_primary()
-        # if followed by LPAREN, it's a function call
+        
+        # handle dot notation (method calls and attribute access)
+        while self.match('DOT'):
+            self.consume('DOT')
+            method_name = self.consume('IDENT')[1]
+            if self.match('LPAREN'):
+                self.consume('LPAREN')
+                args = []
+                while not self.match('RPAREN'):
+                    args.append(self.parse_expression())
+                    if self.match('COMMA'):
+                        self.consume('COMMA')
+                self.consume('RPAREN')
+                expr = ('method_call', expr, method_name, args)
+            else:
+                expr = ('get_attr', expr, method_name)
+        
+        # handle function calls
         if self.match('LPAREN') and expr[0] == 'var':
             name = expr[1]
             self.consume('LPAREN')
@@ -198,13 +220,14 @@ class Parser:
                     self.consume('COMMA')
             self.consume('RPAREN')
             return ('call', name, args)
+        
         return expr
 
     def parse_primary(self):
         tok = self.peek()
         if tok is None:
             raise SyntaxError("Unexpected end of input")
-        if tok[0] == 'STRING':          # ← fixed: check STRING first
+        if tok[0] == 'STRING':
             self.consume()
             text = tok[1][1:-1]
             return ('str', text)
@@ -231,8 +254,6 @@ def parse(tokens):
     return ast
 
 
-# ── environment (supports nested scopes) ──
-
 class Environment:
     def __init__(self, parent=None):
         self.vars = {}
@@ -249,7 +270,6 @@ class Environment:
         self.vars[name] = value
 
     def assign(self, name, value):
-        # walk up the chain to find where it lives
         if name in self.vars:
             self.vars[name] = value
         elif self.parent:
@@ -258,14 +278,10 @@ class Environment:
             self.vars[name] = value
 
 
-# ── return value signal ──
-
 class ReturnValue(Exception):
     def __init__(self, value):
         self.value = value
 
-
-# ── evaluator ──
 
 def evaluate(node, env):
     kind = node[0]
@@ -273,7 +289,7 @@ def evaluate(node, env):
     if kind == 'num':
         return node[1]
     
-    if kind == 'str':           # ← fixed: combined duplicate checks
+    if kind == 'str':
         return node[1]
 
     if kind == 'var':
@@ -306,12 +322,12 @@ def evaluate(node, env):
             return l / r
         if op == '^':  return l ** r
         if op == '^^': return (l ** r) ** r
-        if op == '==': return 1 if l == r else 0
-        if op == '!=': return 1 if l != r else 0
-        if op == '>':  return 1 if l > r else 0
-        if op == '<':  return 1 if l < r else 0
-        if op == '>=': return 1 if l >= r else 0
-        if op == '<=': return 1 if l <= r else 0
+        if op == '==': return 'true' if l == r else 'false'
+        if op == '!=': return 'true' if l != r else 'false'
+        if op == '>':  return 'true' if l > r else 'false'
+        if op == '<':  return 'true' if l < r else 'false'
+        if op == '>=': return 'true' if l >= r else 'false'
+        if op == '<=': return 'true' if l <= r else 'false'
 
     if kind == 'negate':
         return -evaluate(node[1], env)
@@ -338,16 +354,28 @@ def evaluate(node, env):
         _, name, params, body = node
         env.set(name, ('function', params, body, env))
         return f"<function {name}>"
+    
+    if kind == 'class':
+        _, name, methods = node
+        env.set(name, ('class', methods, env))
+        return f"<class {name}>"
 
     if kind == 'call':
         _, name, args = node
         func = env.get(name)
+        
+        # handle class instantiation
+        if isinstance(func, tuple) and func[0] == 'class':
+            _, methods, class_env = func
+            obj = {'__class__': name, '__methods__': methods, '__env__': class_env}
+            return ('object', obj)
+        
+        # handle function calls
         if not isinstance(func, tuple) or func[0] != 'function':
             raise TypeError(f"'{name}' is not a function")
         _, params, body, closure_env = func
         if len(args) != len(params):
             raise TypeError(f"{name} expects {len(params)} args, got {len(args)}")
-        # create a new scope for the function
         local_env = Environment(parent=closure_env)
         for param, arg in zip(params, args):
             local_env.set(param, evaluate(arg, env))
@@ -355,7 +383,52 @@ def evaluate(node, env):
             return evaluate(body, local_env)
         except ReturnValue as r:
             return r.value
+    
+    if kind == 'object':
+        return node[1]
+    
+    if kind == 'method_call':
+        _, obj_expr, method_name, args = node
+        obj = evaluate(obj_expr, env)
+        if not isinstance(obj, tuple) or obj[0] != 'object':
+            raise TypeError("Can only call methods on objects")
 
+        _, obj_data = obj
+        methods = obj_data['__methods__']
+
+        method_def = None
+        for m in methods:
+            if m[0] == 'def' and m[1] == method_name:
+                method_def = m
+                break
+        
+        if not method_def:
+            raise AttributeError(f"Object has no method '{method_name}'")
+        
+        _, _, params, body = method_def
+        if len(args) != len(params):
+            raise TypeError(f"{method_name} expects {len(params)} args, got {len(args)}")
+        
+        method_env = Environment(parent=obj_data['__env__'])
+        method_env.set('self', ('object', obj_data))
+        for param, arg in zip(params, args):
+            method_env.set(param, evaluate(arg, env))
+
+        try:
+            return evaluate(body, method_env)
+        except ReturnValue as r:
+            return r.value
+    
+    if kind == 'get_attr':
+        _, obj_expr, attr_name = node
+        obj = evaluate(obj_expr, env)
+        if not isinstance(obj, tuple) or obj[0] != 'object':
+            raise TypeError("Can only access attributes on objects")
+        _, obj_data = obj
+        if attr_name in obj_data:
+            return obj_data[attr_name]
+        raise AttributeError(f"Object has no attribute '{attr_name}'")
+    
     if kind == 'return':
         raise ReturnValue(evaluate(node[1], env))
 
@@ -370,7 +443,7 @@ def run(source, env):
 
 def repl():
     env = Environment()
-    print("Mini Lang  |  type 'exit' to quit")
+    print("Wise  |  type 'exit' to quit")
     print("-" * 35)
     while True:
         try:
@@ -380,7 +453,7 @@ def repl():
             result = run(source, env)
             if result is not None:
                 print(result)
-        except (SyntaxError, NameError, ZeroDivisionError, TypeError, RuntimeError) as e:
+        except (SyntaxError, NameError, ZeroDivisionError, TypeError, RuntimeError, AttributeError) as e:
             print(f"Error: {e}")
 
 repl()
