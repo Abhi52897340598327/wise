@@ -329,6 +329,7 @@ def evaluate(node, env):
         if op == '>=': return 'true' if l >= r else 'false'
         if op == '<=': return 'true' if l <= r else 'false'
 
+
     if kind == 'negate':
         return -evaluate(node[1], env)
 
